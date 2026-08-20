@@ -1,0 +1,349 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum UserStatus {
+  ACTIVE
+  BLOCKED
+  SUSPENDED
+}
+
+enum WalletStatus {
+  ACTIVE
+  BLOCKED
+  FROZEN
+  CLOSED
+}
+
+enum WalletTransactionType {
+  WALLET_TOPUP
+  ORDER_PAYMENT
+
+  WITHDRAWAL_REQUEST
+  WITHDRAWAL_RESERVED
+  WITHDRAWAL_PROCESSED
+  WITHDRAWAL_RELEASED
+
+  REFUND
+}
+
+enum LedgerEntryType {
+  CREDIT
+  DEBIT
+}
+
+enum LedgerStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REVERSED
+}
+
+enum LedgerReferenceType {
+  TOPUP
+  ORDER
+  WITHDRAWAL
+  REFUND
+  SYSTEM
+}
+
+enum IdempotencyStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum OrderStatus {
+  PAYMENT_PENDING
+  PAID
+  CANCELLED
+  REFUNDED
+}
+
+enum OrderPaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum RefundStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum WithdrawalStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  passwordHash String
+  status       UserStatus @default(ACTIVE)
+
+  wallet Wallet?
+
+  sessions      Session[]
+  refreshTokens RefreshToken[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([email])
+}
+
+model Session {
+  id     String @id @default(cuid())
+  userId String
+
+  deviceId   String
+  deviceName String?
+  ipAddress  String?
+  userAgent  String?
+
+  lastActiveAt DateTime  @default(now())
+  expiresAt    DateTime
+  revokedAt    DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  refreshTokens RefreshToken[]
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([deviceId])
+}
+
+model RefreshToken {
+  id        String @id @default(cuid())
+  userId    String
+  sessionId String
+
+  tokenHash String @unique
+
+  expiresAt DateTime
+  revokedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([sessionId])
+  @@index([expiresAt])
+}
+
+model Wallet {
+  id String @id @default(cuid())
+
+  userId String @unique
+
+  availableBalance Decimal @default(0) @db.Decimal(19, 4)
+
+  lockedBalance Decimal @default(0) @db.Decimal(19, 4)
+
+  currency String @default("INR") @db.VarChar(3)
+
+  status WalletStatus @default(ACTIVE)
+
+  version Int @default(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  ledgerEntries WalletLedger[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model WalletLedger {
+  id String @id @default(cuid())
+
+  transactionId String @unique
+
+  walletId String
+
+  transactionType WalletTransactionType
+
+  entryType LedgerEntryType
+
+  amount Decimal @db.Decimal(19, 4)
+
+  openingBalance Decimal @db.Decimal(19, 4)
+
+  closingBalance Decimal @db.Decimal(19, 4)
+
+  openingLockedBalance Decimal @db.Decimal(19, 4)
+
+  closingLockedBalance Decimal @db.Decimal(19, 4)
+
+  referenceType LedgerReferenceType?
+
+  referenceId String?
+
+  status LedgerStatus @default(COMPLETED)
+
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Restrict)
+
+  @@index([walletId])
+  @@index([transactionType])
+  @@index([referenceType, referenceId])
+  @@index([createdAt])
+  @@index([status])
+}
+
+model IdempotencyKey {
+  id String @id @default(cuid())
+
+  userId String
+
+  key String
+
+  endpoint String
+
+  requestHash String?
+
+  responseStatus Int?
+
+  responseBody Json?
+
+  status IdempotencyStatus @default(PROCESSING)
+
+  createdAt DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, key])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Order {
+  id String @id @default(cuid())
+
+  userId String
+
+  orderNumber String @unique
+
+  amount Decimal @db.Decimal(19, 4)
+
+  currency String @default("INR")
+
+  status OrderStatus @default(PAYMENT_PENDING)
+
+  createdAt DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+
+  payments OrderPayment[]
+
+  refunds OrderRefund[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model OrderPayment {
+  id String @id @default(cuid())
+
+  orderId String
+
+  transactionId String @unique
+
+  amount Decimal @db.Decimal(19, 4)
+
+  currency String @default("INR")
+
+  status OrderPaymentStatus @default(PENDING)
+
+  referenceId String?
+
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@index([orderId])
+  @@index([status])
+}
+
+model OrderRefund {
+  id String @id @default(cuid())
+
+  orderId String
+
+  transactionId String @unique
+
+  amount Decimal @db.Decimal(19, 4)
+
+  currency String @default("INR")
+
+  status RefundStatus @default(PENDING)
+
+  referenceId String?
+
+  reason String?
+
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@index([orderId])
+  @@index([status])
+}
+
+model Withdrawal {
+  id String @id @default(cuid())
+
+  userId String
+
+  walletId String
+
+  amount Decimal @db.Decimal(19, 4)
+
+  currency String @default("INR")
+
+  status WithdrawalStatus @default(PENDING)
+
+  referenceId String?
+
+  failureReason String?
+
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([walletId])
+  @@index([status])
+  @@index([createdAt])
+}
